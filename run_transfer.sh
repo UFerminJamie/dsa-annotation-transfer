@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=hpg-athena-transfer
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=08:00:00
-#SBATCH --output=slurm-%j.out
-#SBATCH --error=slurm-%j.err
+#SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
 
 set -euo pipefail
 
@@ -32,5 +32,8 @@ fi
 
 # The CLI reads ATHENA_API_KEY from the environment or this project's ignored
 # .env file. Neither the key nor the Girder token is passed as an argument.
-manifest="$project_dir/transfer-manifest-${SLURM_JOB_ID:-manual}.json"
+manifest="$project_dir/transfer-manifest/${SLURM_JOB_ID:-manual}.json"
 exec python3 -m hpg_athena_transfer --destination "$destination" --manifest "$manifest" "$@"
+
+#sbatch run_transfer.sh athena_url \
+#--source /path/to/json_dir \

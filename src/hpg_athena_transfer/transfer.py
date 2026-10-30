@@ -39,6 +39,22 @@ def _identical(records: List[Dict[str, Any]], sha256: str, index: int,
     return None
 
 
+def _annotation_content(document: Dict[str, Any]) -> str:
+    """Return stable content for duplicate checks, ignoring name edge spaces and provenance."""
+    content = dict(document)
+    if isinstance(content.get("name"), str):
+        content["name"] = content["name"].strip()
+    attributes = content.get("attributes")
+    if isinstance(attributes, dict) and PROVENANCE_KEY in attributes:
+        attributes = dict(attributes)
+        attributes.pop(PROVENANCE_KEY)
+        if attributes:
+            content["attributes"] = attributes
+        else:
+            content.pop("attributes", None)
+    return json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
 def _complete(record: Dict[str, Any], document: Dict[str, Any]) -> bool:
     """Confirm that an active Athena annotation has the source geometry count."""
     annotation = record.get("annotation", {})
@@ -48,7 +64,8 @@ def _complete(record: Dict[str, Any], document: Dict[str, Any]) -> bool:
         count = len(elements) if isinstance(elements, list) else None
     return (record.get("_active") is not False
             and isinstance(annotation, dict)
-            and annotation.get("name") == document["name"]
+            and isinstance(annotation.get("name"), str)
+            and annotation["name"].strip() == document["name"].strip()
             and type(count) is int and count == len(document["elements"]))
 
 
@@ -56,7 +73,8 @@ def _file_summary(rows: List[Dict[str, Any]]) -> Dict[str, int]:
     grouped: Dict[str, set] = {}
     for row in rows:
         grouped.setdefault(row["source_path"], set()).add(row["status"])
-    precedence = ("failed", "invalid", "ambiguous", "unmatched", "uploaded", "skipped-identical", "planned")
+    precedence = ("failed", "invalid", "ambiguous", "unmatched", "uploaded", "skipped-identical",
+                  "skipped-duplicate", "planned")
     return dict(Counter(next(status for status in precedence if status in statuses)
                         for statuses in grouped.values()))
 
@@ -85,7 +103,7 @@ def _row(source: Source) -> Dict[str, Any]:
 
 def transfer(client: AthenaClient, source_dir: Path, destination: str, manifest: Path,
              recursive: bool = False, apply: bool = False,
-             normalize_rgba_alpha: bool = False) -> Dict[str, Any]:
+             normalize_rgba_alpha: bool = True) -> Dict[str, Any]:
     if not source_dir.is_dir():
         raise ValueError("Source directory does not exist or is not readable")
     sources = discover(source_dir, recursive)
@@ -96,6 +114,8 @@ def transfer(client: AthenaClient, source_dir: Path, destination: str, manifest:
     duplicate_slide_basenames = sum(len(candidates) > 1 for candidates in slide_index.values())
     rows: List[Dict[str, Any]] = []
     annotation_cache: Dict[str, List[Dict[str, Any]]] = {}
+    seen_annotations: Dict[str, set] = {}
+    existing_annotations: Dict[str, set] = {}
 
     for source_index, source in enumerate(sources, 1):
         row = _row(source)
@@ -120,30 +140,46 @@ def transfer(client: AthenaClient, source_dir: Path, destination: str, manifest:
                     raise AnnotationError("source attributes already use the reserved provenance key")
                 if slide.id not in annotation_cache:
                     annotation_cache[slide.id] = client.annotations(slide.id)
+                    seen_annotations[slide.id] = set()
+                    existing_annotations[slide.id] = {
+                        _annotation_content(record.get("annotation", record))
+                        for record in annotation_cache[slide.id]
+                        if record.get("_active") is not False
+                        and isinstance(record.get("annotation", record), dict)
+                    }
                 for index, original in enumerate(documents):
                     document_row = dict(row, document_index=index, annotation_name=original["name"],
                                         element_count=len(original["elements"]))
                     normalized, adaptations = normalize_scientific_rgba_alpha(original)
+                    document_row["color_format_adaptations"] = adaptations
                     records = annotation_cache[slide.id]
+                    content = _annotation_content(normalized if normalize_rgba_alpha else original)
+                    if content in seen_annotations[slide.id]:
+                        document_row.update(status="skipped-duplicate")
+                        rows.append(document_row)
+                        _write_manifest(manifest, rows, not apply, duplicate_slide_basenames)
+                        continue
                     found = _identical(records, sha256, index, source.path.name, relative_path)
                     if found:
                         if _complete(found, original):
+                            seen_annotations[slide.id].add(content)
                             document_row.update(status="skipped-identical", annotation_id=found.get("_id"))
                         else:
                             document_row.update(status="failed", annotation_id=found.get("_id"),
                                                 error="existing active annotation has a different name or element count")
+                    elif content in existing_annotations[slide.id]:
+                        seen_annotations[slide.id].add(content)
+                        document_row.update(status="skipped-duplicate")
                     elif adaptations and not normalize_rgba_alpha:
                         document_row.update(status="invalid", error=(
-                            "%d fillColor rgba alpha values use scientific notation; "
-                            "rerun with --normalize-rgba-alpha to preserve their values in DSA-compatible decimal notation"
+                            "%d fillColor rgba alpha values use scientific notation and normalization is disabled"
                             % adaptations))
                     elif not apply:
+                        seen_annotations[slide.id].add(content)
                         document_row["status"] = "planned"
-                        document_row["color_format_adaptations"] = adaptations if normalize_rgba_alpha else 0
                     else:
-                        # Preserve fields and geometry. Adapt color spelling only
-                        # when requested, and record the exact number of changes.
-                        document_row["color_format_adaptations"] = adaptations if normalize_rgba_alpha else 0
+                        # Preserve fields and geometry. Record each color-syntax
+                        # adaptation while keeping the source file unchanged.
                         document = dict(normalized if normalize_rgba_alpha else original)
                         document["attributes"] = dict(original.get("attributes", {}))
                         document["attributes"][PROVENANCE_KEY] = {
@@ -162,6 +198,8 @@ def transfer(client: AthenaClient, source_dir: Path, destination: str, manifest:
                             if verified is None:
                                 raise APIError("created annotation is not active with the expected name and element count")
                             document_row.update(status="uploaded", annotation_id=created["_id"])
+                            seen_annotations[slide.id].add(content)
+                            existing_annotations[slide.id].add(content)
                         except APIError as exc:
                             # The request may have committed before a timeout. Re-query
                             # before declaring failure, so the next run can safely resume.
@@ -173,6 +211,8 @@ def transfer(client: AthenaClient, source_dir: Path, destination: str, manifest:
                             except APIError:
                                 recovered = None
                             if recovered and _complete(recovered, original):
+                                seen_annotations[slide.id].add(content)
+                                existing_annotations[slide.id].add(content)
                                 document_row.update(status="uploaded", annotation_id=recovered.get("_id"))
                             else:
                                 document_row.update(status="failed", error=str(exc))

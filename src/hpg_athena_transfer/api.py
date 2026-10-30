@@ -152,3 +152,6 @@ class AthenaClient:
         if not isinstance(result, dict) or not result.get("_id"):
             raise APIError("Athena did not return an annotation ID")
         return result
+
+    def delete_annotation(self, annotation_id: str) -> None:
+        self._request("DELETE", "/annotation/%s" % annotation_id)

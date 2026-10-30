@@ -32,8 +32,8 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--api-url", default="https://athena.rc.ufl.edu/api/v1",
                          help="Girder API base URL (default: %(default)s)")
     command.add_argument("--recursive", action="store_true", help="Search source subdirectories; default is top level only")
-    command.add_argument("--normalize-rgba-alpha", action="store_true",
-                         help="Explicitly rewrite exponent-form rgba fillColor alpha to equal plain decimals; record count in manifest")
+    command.add_argument("--normalize-rgba-alpha", action="store_true", default=True,
+                         help="(Compatibility option) Convert scientific-notation rgba alpha to equivalent decimals (automatic)")
     mode = command.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Preview only (this is the default)")
     mode.add_argument("--apply", action="store_true", help="Create annotations after matching and validation")
@@ -70,7 +70,7 @@ def main() -> int:
         print("Athena user: %s; slides: %d; source files: %d; annotation records: %d" %
               (user.get("login") or user["id"], result["slides"], result["files"], result["records"]))
         print("Duplicate slide basenames: %d" % result["duplicate_slide_basenames"])
-        for status in ("uploaded", "skipped-identical", "planned", "unmatched", "ambiguous", "invalid", "failed"):
+        for status in ("uploaded", "skipped-identical", "skipped-duplicate", "planned", "unmatched", "ambiguous", "invalid", "failed"):
             print("%s: %d files; %d annotation records" %
                   (status, result["file_summary"].get(status, 0), result["summary"].get(status, 0)))
         print("Manifest: " + result["manifest"])
