@@ -315,7 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="DSA collection or folder URL")
     parser.add_argument("--output-directory", required=True, type=Path, help="Directory for annotation JSON files")
-    parser.add_argument("--api-key", help="Girder API key (or set DSA_API_KEY)")
+    parser.add_argument("--api-key", help="Girder API key (or set ATHENA_API_KEY)")
     parser.add_argument("--overwrite", action="store_true", help="Replace existing output files")
     return parser
 
@@ -326,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         api_url, collection_id, folder_id = parse_dsa_url(args.url)
         ensure_output_directory(args.output_directory)
-        client = GirderClient(api_url, args.api_key or os.environ.get("DSA_API_KEY"))
+        client = GirderClient(api_url, args.api_key or os.environ.get("ATHENA_API_KEY"))
         items = client.items_in_folder_tree(collection_id, folder_id)
         LOG.info("Found %d WSI item(s) in requested resource", len(items))
         stats = download(client, items, args.output_directory, args.overwrite)

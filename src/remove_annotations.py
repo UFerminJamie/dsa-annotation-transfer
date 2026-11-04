@@ -11,8 +11,7 @@ from hpg_athena_transfer.api import APIError, AthenaClient
 
 
 DEFAULT_DESTINATION = (
-    "https://athena.rc.ufl.edu/#user/64c97ac12f701e8bf787dd41/"
-    "folder/6adb832ee27b9738119e0715"
+    ""
 )
 
 

@@ -11,25 +11,24 @@ from hpg_athena_transfer.api import APIError, AthenaClient
 
 
 DEFAULT_DESTINATION = (
-    "https://athena.rc.ufl.edu/#user/64c97ac12f701e8bf787dd41/"
-    "folder/6adb832ee27b9738119e0715"
+    ""
 )
 TARGET_NAMES = {
-    "cortical heatmap",
-    "cortical refined heatmap",
-    "medullary heatmap",
-    "medullary refined heatmap",
-    "cortical mask gt",
-    "medullary mask gt",
-    "medullary_heatmap",
-    "cortical_heatmap",
-    "medullary_heatmap",
-    "cortical_gt",
-    "medullary_gt",
-    "cortical_mask",
-    "medullary_mask",
-    "cortical heatmap refinement",
-    "medullary heatmap refinement"
+    # "cortical heatmap",
+    # "cortical refined heatmap",
+    # "medullary heatmap",
+    # "medullary refined heatmap",
+    # "cortical mask gt",
+    # "medullary mask gt",
+    # "medullary_heatmap",
+    # "cortical_heatmap",
+    # "medullary_heatmap",
+    # "cortical_gt",
+    # "medullary_gt",
+    # "cortical_mask",
+    # "medullary_mask",
+    # "cortical heatmap refinement",
+    # "medullary heatmap refinement"
 }
 
 
