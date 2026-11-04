@@ -3,7 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from download_dsa_annotations import GirderClient, download
+from download_dsa_annotation import GirderClient, download
 
 
 class FolderTraversalTests(unittest.TestCase):
