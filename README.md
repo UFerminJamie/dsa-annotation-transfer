@@ -45,46 +45,43 @@ The part after the sample name can be anything. The corresponding Athena destina
 
 ## Transfer Annotations
 
- A 401 usually indicates an invalid API key; a 403 usually indicates missing destination access or annotation permission.
-
 Below is a command for transferring annotations to uniquely matched slides in one Athena folder.
 
 ```bash
 sbatch --account YOUR_ACCOUNT --partition YOUR_PARTITION run_transfer.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID' --source /path/to/your/annotations --apply
 ```
 
-## Download DSA annotations
+Note: A 401 usually indicates an invalid API key; a 403 usually indicates missing destination access or annotation permission.
+
+## Download annotations from DSA to Hipergator
 
 Download the selected annotation names from a DSA collection or folder, including nested folders. This writes JSON files locally. Existing output files are skipped unless `--overwrite` is supplied.
 
 ```bash
-export DSA_API_KEY='YOUR_DSA_API_KEY'
 ./download_dsa_annotation.sh \
   --url 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID' \
   --output-directory /path/to/downloaded_annotations
 ```
 
-## Remove named annotations
+## Remove annotations
 
-This helper previews active annotations whose names match its configured target-name list on WSIs in the selected Athena destination. Review the IDs and names, then add `--apply` to delete those records. It reads `ATHENA_API_KEY` from the environment or ignored `.env` file. Pass a destination URL or ID as the optional first argument; without one, it uses the configured destination in the Python script.
+This helper previews active annotations whose names match its configured target-name list on WSIs in the selected Athena destination. Review the IDs and names, then add `--apply` to delete those records.
 
 ```bash
 ./remove_named_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID'
 ./remove_named_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID' --apply
 ```
 
-Run the Python entrypoint directly with `python3 src/remove_named_annotations.py` and the same arguments.
+Change the global variable `TARGET_NAMES` in `src/remove_named_annotations.py` to specify which annotations to remove in the item.
 
-## Remove all annotations with `remove_annotations.sh`
+## Remove all annotations (Warning)
 
-This helper previews every active annotation attached to WSI items in an Athena collection or folder. Review the list before passing `--apply`; applying deletes all listed records regardless of name or provenance. The optional first argument selects the destination, and the script's configured destination is used when omitted.
+ Review the list before passing `--apply`; applying deletes all listed records regardless of name or provenance. The optional first argument selects the destination, and the script's configured destination is used when omitted.
 
 ```bash
 ./remove_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID'
 ./remove_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID' --apply
 ```
-
-Run the Python entrypoint directly with `python3 src/remove_annotations.py [DESTINATION_URL_OR_ID] [--apply]`. It uses the `ATHENA_API_KEY` environment variable or ignored `.env` file.
 
 ## Tests
 
