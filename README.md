@@ -43,60 +43,45 @@ The part after the sample name can be anything. The corresponding Athena destina
    hpg-athena-transfer --check-connection --destination 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID'
    ```
 
-4. Preview matches and write a manifest. `--dry-run` is the default, so this command does not create annotations:
+## Transfer Annotations
 
-   ```bash
-   hpg-athena-transfer --source /path/to/your/annotations --destination 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID' --dry-run
-   ```
-
-5. Open `transfer-manifest.json` and review the `sample_name`, `slide_name`, and `status` for each record. Resolve any `unmatched`, `ambiguous`, or `invalid` records. Then upload:
-
-   ```bash
-   hpg-athena-transfer --source /path/to/your/annotations --destination 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID' --apply
-   ```
-
-If interrupted, rerun the same `--apply` command. The tool uses a source path relative to `--source`, hash, and document index in annotation provenance to skip documents already uploaded to that slide. Refresh the matched slide item's **Annotations** panel in Athena to view results.
-
-## Flags
-
-- `--source DIR`: Directory containing annotation JSON files. Required for a transfer; there is no built-in project directory.
-- `--destination URL_OR_ID`: Athena collection or folder URL or 24-character ID. Required for a transfer. A URL is best if an ID is ambiguous.
-- `--dry-run`: Preview matches and validation without creating annotations. This is the default.
-- `--apply`: Create annotations for valid matched files.
-- `--recursive`: Include JSON files in source subdirectories. By default, only the top level is read.
-- `--manifest PATH`: Write the report to this path. Default: `transfer-manifest.json`.
-- `--check-connection`: Check the API key and, if supplied, access to `--destination`; then exit. No source directory is needed.
-- `--api-url URL`: Girder API base URL. Default: `https://athena.rc.ufl.edu/api/v1`.
-- `--normalize-rgba-alpha`: Convert scientific-notation alpha values in `fillColor` to equivalent decimal notation in the upload payload. Source files are unchanged; the adaptation count is recorded.
-
-## Matching and annotation format
-
-- The tool searches slides in the selected Athena collection or folder and its descendant folders. A slide must have a recognized whole-slide image filename or large-image metadata.
-- For each JSON file, remove only its `.json` extension, then compare the beginning of that filename to each slide's sample name: the slide item name or one of its image filenames with the image extension removed. Matching is case sensitive. For example, `Sample_A_review_2026.json` matches `Sample_A.svs`.
-- Any remaining JSON filename text is allowed. The suffix does not determine the match. When both `Sample` and `Sample_A` are slide names, `Sample_A_review.json` uses the longest matching name, `Sample_A`.
-- If multiple slide items share the selected basename, the file is marked `ambiguous` and skipped. A file with no matching basename is marked `unmatched`. Multiple differently named JSON files may attach to one slide.
-- Every valid JSON annotation document becomes a separate entry on the slide. A source annotation's name, attributes, elements, and display settings are preserved. Empty element lists are valid for named native annotations.
-- Known filename endings `_heatmap.json`, `_refined_heatmap.json`, `_mask_gt.json`, and `_mask_prediction.json` give the manifest and provenance the labels Heatmap, Refined Heatmap, Ground Truth Mask, and Prediction Mask. All other JSON names receive the generic `Annotation` label. Labels do not control matching.
-- The tool adds `annotation.attributes.hpg_athena_transfer` with source filename, relative path, SHA-256 hash, document index, type label, and any color adaptation count. It checks this marker on reruns. It does not replace or delete existing annotations.
-- JSON must use native DSA annotation structures. Malformed or unsupported documents are `invalid`. Athena rejects `rgba(...)` fill colors whose alpha uses scientific notation; use `--normalize-rgba-alpha` to convert those values when needed.
-
-## Reports and Slurm
-
-The manifest records source path, matched sample and slide, annotation type, document index, annotation ID, status, and any error. Statuses are `planned`, `uploaded`, `skipped-identical`, `unmatched`, `ambiguous`, `invalid`, and `failed`. A JSON file can contain multiple annotation records. A 401 usually indicates an invalid API key; a 403 usually indicates missing destination access or annotation permission.
-
-To use the included Slurm script, submit from this repository directory and supply your site's account or partition through `sbatch` if required:
+Below is a command for transferring annotations to uniquely matched slides in one Athena folder.
 
 ```bash
-sbatch --account YOUR_ACCOUNT --partition YOUR_PARTITION run_transfer.sh 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID' --source /path/to/your/annotations
+sbatch --account YOUR_ACCOUNT --partition YOUR_PARTITION run_transfer.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID' --source /path/to/your/annotations --apply
 ```
 
-That job is a dry-run. Review `slurm-JOBID.out` and `transfer-manifest-JOBID.json`, then submit again with `--apply`:
+Note: A 401 usually indicates an invalid API key; a 403 usually indicates missing destination access or annotation permission.
+
+## Download annotations from DSA to Hipergator
+
+Download the selected annotation names from a DSA collection or folder, including nested folders. This writes JSON files locally. Existing output files are skipped unless `--overwrite` is supplied.
 
 ```bash
-sbatch --account YOUR_ACCOUNT --partition YOUR_PARTITION run_transfer.sh 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID' --source /path/to/your/annotations --apply
+./download_dsa_annotation.sh \
+  --url 'https://athena.rc.ufl.edu/#collection/YOUR_COLLECTION_ID' \
+  --output-directory /path/to/downloaded_annotations
 ```
 
-The script uses one CPU, 4 GB RAM, and an eight-hour limit; adjust its `#SBATCH` settings or use `sbatch` options for your workload. It reads the same environment variable or ignored `.env` file as the CLI.
+## Remove annotations
+
+This helper previews active annotations whose names match its configured target-name list on WSIs in the selected Athena destination. Review the IDs and names, then add `--apply` to delete those records.
+
+```bash
+./remove_named_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID'
+./remove_named_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID' --apply
+```
+
+Change the global variable `TARGET_NAMES` in `src/remove_named_annotations.py` to specify which annotations to remove in the item.
+
+## Remove all annotations (Warning)
+
+ Review the list before passing `--apply`; applying deletes all listed records regardless of name or provenance. The optional first argument selects the destination, and the script's configured destination is used when omitted.
+
+```bash
+./remove_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID'
+./remove_annotations.sh 'https://athena.rc.ufl.edu/#folder/YOUR_FOLDER_ID' --apply
+```
 
 ## Tests
 

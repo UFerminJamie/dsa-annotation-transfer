@@ -28,12 +28,14 @@ class FakeClient:
         return self._slides
 
     def annotations(self, item_id):
-        return list(self.records.get(item_id, []))
+        return [record for record in self.records.get(item_id, [])
+                if record.get("_active") is not False]
 
     def create_annotation(self, item_id, annotation):
         if self.fail:
             raise APIError("Athena HTTP 503 on POST /annotation")
-        record = {"_id": "annotation%d" % (len(self.created) + 1), "annotation": annotation}
+        record = {"_id": "annotation%d" % (len(self.created) + 1), "annotation": annotation,
+                  "_elementCount": len(annotation["elements"])}
         self.created.append(record)
         self.records.setdefault(item_id, []).append(record)
         return record
@@ -134,6 +136,39 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(repeated["summary"], {"skipped-identical": 2})
         self.assertEqual(len(client.created), 2)
 
+    def test_duplicate_annotation_content_is_saved_once(self):
+        duplicate = document()
+        self.write("Exact_duplicates.json", [duplicate, json.loads(json.dumps(duplicate))])
+        client = FakeClient()
+        preview = transfer(client, self.source, "destination", self.manifest)
+        self.assertEqual(preview["summary"], {"planned": 1, "skipped-duplicate": 1})
+        applied = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(applied["summary"], {"uploaded": 1, "skipped-duplicate": 1})
+        self.assertEqual(len(client.created), 1)
+
+    def test_duplicate_annotation_content_across_files_is_saved_once(self):
+        duplicate = document()
+        self.write("Exact_first.json", duplicate)
+        self.write("Exact_second.json", json.loads(json.dumps(duplicate)))
+        client = FakeClient()
+        applied = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(applied["summary"], {"uploaded": 1, "skipped-duplicate": 1})
+        self.assertEqual(len(client.created), 1)
+        repeated = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(repeated["summary"], {"skipped-identical": 1, "skipped-duplicate": 1})
+        self.assertEqual(len(client.created), 1)
+
+    def test_leading_space_in_existing_annotation_name_does_not_create_duplicate(self):
+        source_document = document("tubules")
+        self.write("Exact_tubules.json", source_document)
+        client = FakeClient()
+        existing = document(" tubules")
+        client.records["item1"] = [{"_id": "existing", "annotation": existing,
+                                     "_elementCount": len(existing["elements"])}]
+        result = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(result["summary"], {"skipped-duplicate": 1})
+        self.assertEqual(client.created, [])
+
     def test_ambiguous_unmatched_and_multiple_files_for_one_sample(self):
         self.write("Exact_heatmap.json", document())
         self.write("Missing_heatmap.json", document())
@@ -145,7 +180,7 @@ class TransferTests(unittest.TestCase):
         child.mkdir()
         (child / "Exact_heatmap.json").write_text(json.dumps(document()))
         result = transfer(FakeClient(), self.source, "destination", self.manifest, recursive=True)
-        self.assertEqual(result["summary"], {"planned": 2, "unmatched": 1})
+        self.assertEqual(result["summary"], {"planned": 1, "skipped-duplicate": 1, "unmatched": 1})
 
     def test_arbitrary_json_names_are_uploaded_to_matching_slide(self):
         self.write("Exact_regions_v5.json", document("Regions"))
@@ -154,15 +189,15 @@ class TransferTests(unittest.TestCase):
         client = FakeClient([Slide("a", "Exact.svs", ("Exact",)),
                              Slide("b", "Exactish.tif", ("Exactish",))])
         result = transfer(client, self.source, "destination", self.manifest, apply=True)
-        self.assertEqual(result["summary"], {"uploaded": 3})
+        self.assertEqual(result["summary"], {"uploaded": 2, "skipped-duplicate": 1})
         records = json.loads(self.manifest.read_text())["records"]
         self.assertEqual({row["source_path"].split("/")[-1]: row["slide_id"] for row in records},
                          {"Exact_regions_v5.json": "a", "Exact_any_other_file.json": "a",
                           "Exactish_regions.json": "b"})
         self.assertEqual({row["annotation_type"] for row in records}, {"Annotation"})
-        self.assertEqual(len(client.created), 3)
+        self.assertEqual(len(client.created), 2)
         repeated = transfer(client, self.source, "destination", self.manifest, apply=True)
-        self.assertEqual(repeated["summary"], {"skipped-identical": 3})
+        self.assertEqual(repeated["summary"], {"skipped-identical": 2, "skipped-duplicate": 1})
 
     def test_same_filename_in_different_subdirectories_uploads_both(self):
         for folder in ("first", "second"):
@@ -172,11 +207,11 @@ class TransferTests(unittest.TestCase):
         client = FakeClient()
         result = transfer(client, self.source, "destination", self.manifest,
                           recursive=True, apply=True)
-        self.assertEqual(result["summary"], {"uploaded": 2})
-        self.assertEqual(len(client.created), 2)
+        self.assertEqual(result["summary"], {"uploaded": 1, "skipped-duplicate": 1})
+        self.assertEqual(len(client.created), 1)
         repeated = transfer(client, self.source, "destination", self.manifest,
                             recursive=True, apply=True)
-        self.assertEqual(repeated["summary"], {"skipped-identical": 2})
+        self.assertEqual(repeated["summary"], {"skipped-identical": 1, "skipped-duplicate": 1})
 
     def test_invalid_and_api_failure(self):
         (self.source / "Exact_heatmap.json").write_text("{broken")
@@ -202,24 +237,58 @@ class TransferTests(unittest.TestCase):
         second = transfer(client, self.source, "destination", self.manifest, apply=True)
         self.assertEqual(second["summary"], {"skipped-identical": 1, "uploaded": 1})
 
-    def test_color_adaptation_requires_opt_in_and_is_reported(self):
+    def test_color_adaptation_is_automatic_and_reported(self):
         original = document()
         original["elements"][0]["fillColor"] = "rgba(255, 105, 180, 4.43172e-07)"
         self.write("Exact_heatmap.json", original)
         client = FakeClient()
-        without_option = transfer(client, self.source, "destination", self.manifest, apply=True)
-        self.assertEqual(without_option["summary"], {"invalid": 1})
-        self.assertFalse(client.created)
-        with_option = transfer(client, self.source, "destination", self.manifest,
-                               apply=True, normalize_rgba_alpha=True)
-        self.assertEqual(with_option["summary"], {"uploaded": 1})
+        result = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(result["summary"], {"uploaded": 1})
         record = json.loads(self.manifest.read_text())["records"][0]
         self.assertEqual(record["color_format_adaptations"], 1)
         self.assertEqual(client.created[0]["annotation"]["elements"][0]["fillColor"],
                          "rgba(255, 105, 180, 0.000000443172)")
+        self.assertEqual(original["elements"][0]["fillColor"], "rgba(255, 105, 180, 4.43172e-07)")
+        repeated = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(repeated["summary"], {"skipped-identical": 1})
+        self.assertEqual(json.loads(self.manifest.read_text())["records"][0]["color_format_adaptations"], 1)
+
+    def test_both_classes_are_active_and_complete_after_apply(self):
+        cortical = document("cortical heatmap")
+        medullary = document("medullary heatmap")
+        medullary["elements"][0]["fillColor"] = "rgba(1, 2, 3, 4.43172e-07)"
+        self.write("Exact_heatmap.json", [cortical, medullary])
+        client = FakeClient()
+        result = transfer(client, self.source, "destination", self.manifest,
+                          apply=True, normalize_rgba_alpha=True)
+        self.assertEqual(result["summary"], {"uploaded": 2})
+        self.assertEqual([record["_elementCount"] for record in client.annotations("item1")], [1, 1])
+        self.assertEqual([row["element_count"] for row in json.loads(self.manifest.read_text())["records"]], [1, 1])
+        client.created[1]["_active"] = False
+        repeated = transfer(client, self.source, "destination", self.manifest,
+                            apply=True, normalize_rgba_alpha=True)
+        self.assertEqual(repeated["summary"], {"skipped-identical": 1, "uploaded": 1})
+        self.assertEqual(len(client.annotations("item1")), 2)
+
+    def test_incomplete_existing_annotation_is_reported(self):
+        self.write("Exact_heatmap.json", document())
+        client = FakeClient()
+        transfer(client, self.source, "destination", self.manifest, apply=True)
+        client.created[0]["_elementCount"] = 0
+        repeated = transfer(client, self.source, "destination", self.manifest, apply=True)
+        self.assertEqual(repeated["summary"], {"failed": 1})
+        self.assertEqual(len(client.created), 1)
 
 
 class ApiTests(unittest.TestCase):
+    def test_delete_annotation_uses_annotation_endpoint(self):
+        client = AthenaClient("https://example.org/api/v1", "synthetic-test-key")
+        calls = []
+        client._request = lambda method, path, params=None, body=None, authenticated=True: calls.append(
+            (method, path, params, body, authenticated))
+        client.delete_annotation("annotation123")
+        self.assertEqual(calls, [("DELETE", "/annotation/annotation123", None, None, True)])
+
     def test_paginated_discovery_and_file_basename(self):
         client = AthenaClient("https://example.org/api/v1", "synthetic-test-key")
         calls = []

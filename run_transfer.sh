@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=hpg-athena-transfer
-#SBATCH --cpus-per-task=1
+#SBATCH --job-name=athena-folder-transfer
+#SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=08:00:00
-#SBATCH --output=slurm-%j.out
-#SBATCH --error=slurm-%j.err
+#SBATCH --output=logs/slurm-folder-transfer-%j.out
+#SBATCH --error=logs/slurm-folder-transfer-%j.err
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $1 == --help || $1 == -h ]]; then
-    echo "Usage: sbatch run_transfer.sh ATHENA_COLLECTION_OR_FOLDER_URL_OR_ID --source JSON_DIR [--apply] [other CLI options]" >&2
-    echo "Default: dry-run. Add --apply only after reviewing its manifest." >&2
+    echo "Usage: sbatch run_transfer.sh ATHENA_FOLDER_URL_OR_ID --source JSON_DIR [--apply] [other options]" >&2
+    echo "A nested collection/.../folder/... URL is scoped to its folder. Default: dry-run." >&2
     exit 2
 fi
 
@@ -30,7 +30,6 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 2
 fi
 
-# The CLI reads ATHENA_API_KEY from the environment or this project's ignored
-# .env file. Neither the key nor the Girder token is passed as an argument.
-manifest="$project_dir/transfer-manifest-${SLURM_JOB_ID:-manual}.json"
-exec python3 -m hpg_athena_transfer --destination "$destination" --manifest "$manifest" "$@"
+manifest="$project_dir/transfer-manifest/folder-transfer-${SLURM_JOB_ID:-manual}.json"
+exec python3 "$project_dir/src/run_transfer.py" \
+    --destination "$destination" --manifest "$manifest" "$@"
